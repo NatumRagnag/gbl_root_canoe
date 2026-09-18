@@ -1,9 +1,9 @@
+.PHONY: clean copy_resources submodule_uefi submodule_patcher submodule_ablfvextractor tool_arb_inspect build
 clean:
 	rm -rf build || true
 copy_resources:
 	mkdir -p build/module
 	cp -r module/* build/module/
-	[ -d ../../ablrepo ] && cp -r ../../ablrepo ./build/module/ablrepo || true
 submodule_uefi: copy_resources
 	cd ../../submodules/uefi && make build && make tools
 	cp ../../submodules/uefi/build/BDS.efi ./build/module/BDS.efi
@@ -16,6 +16,9 @@ submodule_patcher: copy_resources
 submodule_ablfvextractor: copy_resources
 	cd ../../submodules/ablfvextractor && make build_android
 	cp ../../submodules/ablfvextractor/build/extractfv_android ./build/module/bin/extractfv
-build: submodule_uefi submodule_patcher submodule_ablfvextractor
+tool_arb_inspect: copy_resources
+	$(MAKE) -C ../../tools/arb_inspect build_android
+	cp ../../tools/arb_inspect/build/arb_inspect_android ./build/module/bin/arb_inspect
+build: submodule_uefi submodule_patcher submodule_ablfvextractor tool_arb_inspect
 	# zip
-	cd build/module && zip -r ../module_android.zip ./
+	python3 ../../tools/package_module.py

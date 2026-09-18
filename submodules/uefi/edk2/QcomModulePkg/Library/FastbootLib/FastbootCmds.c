@@ -2301,6 +2301,15 @@ STATIC VOID UpdateGetVarVariable (VOID)
 {
 }
 
+/* Keep this exact command ahead of the generic reboot prefix at dispatch. */
+STATIC VOID
+CmdRebootBootloader (IN CONST CHAR8 *arg, IN VOID *data, IN UINT32 sz)
+{
+  FastbootOkay ("");
+  RebootDevice (FASTBOOT_MODE);
+  FastbootFail ("Failed to reboot to bootloader");
+}
+
 STATIC VOID CmdGetVarAll (VOID)
 {
   FASTBOOT_VAR *Var;
@@ -2725,6 +2734,7 @@ FastbootCommandSetup (IN VOID *Base, IN UINT64 Size)
       {"boot", CmdBoot},
 #endif
       {"reboot", CmdReboot},
+      {"reboot-bootloader", CmdRebootBootloader},
       {"getvar:", CmdGetVar},
       {"download:", CmdDownload},
   };

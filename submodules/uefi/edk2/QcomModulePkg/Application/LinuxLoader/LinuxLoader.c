@@ -78,6 +78,7 @@
 #include <Protocol/EFICardInfo.h>
 #include <Protocol/SimpleTextIn.h>
 #include "SuperFbMenu.h"
+#include "SuperFbBootKeys.h"
 
 #define MAX_APP_STR_LEN 64
 #define MAX_NUM_FS 10
@@ -93,100 +94,17 @@
   @retval other             Some error occurs when executing this entry point.
 
  **/
-/*
- * 开机时扫描音量上键（WaitForVolumeDownKey 的镜像）。
- *
- * 先清空输入缓冲区，再用 WaitForEvent 在超时窗口内等待一次真正的音量上键。
- * 关键在于：非目标按键（尤其是开机时按住、随后松开的电源键）会被跳过并继续
- * 等待，而不是结束扫描——所以电源键既不会被误当成输入，也不会遮挡音量键。
- *
- * @param TimeoutMs   扫描窗口（毫秒）
- * @return TRUE(1)     检测到音量上键
- * @return FALSE(0)    超时未检测到
- */
-STATIC UINT8
-WaitForVolumeUpKey (IN UINT32 TimeoutMs)
-{
-  EFI_STATUS    Status;
-  EFI_EVENT     TimerEvent;
-  EFI_EVENT     WaitList[2];
-  UINTN         EventIndex;
-  EFI_INPUT_KEY Key;
-  UINT8         KeyDetected = 0;
-
-  /* 先清空输入缓冲区 */
-  gST->ConIn->Reset (gST->ConIn, FALSE);
-
-  /* 创建定时器事件 */
-  Status = gBS->CreateEvent (
-                  EVT_TIMER,
-                  TPL_CALLBACK,
-                  NULL,
-                  NULL,
-                  &TimerEvent
-                  );
-  if (EFI_ERROR (Status)) {
-    DEBUG ((EFI_D_ERROR, "CreateEvent Timer failed: %r\n", Status));
-    return FALSE;
-  }
-
-  /* 设置定时器：一次性触发，单位为 100ns */
-  Status = gBS->SetTimer (
-                  TimerEvent,
-                  TimerRelative,
-                  (UINT64)TimeoutMs * 10000   /* ms -> 100ns */
-                  );
-  if (EFI_ERROR (Status)) {
-    DEBUG ((EFI_D_ERROR, "SetTimer failed: %r\n", Status));
-    gBS->CloseEvent (TimerEvent);
-    return FALSE;
-  }
-
-  /* 等待事件列表：按键事件 或 定时器超时 */
-  WaitList[0] = gST->ConIn->WaitForKey;
-  WaitList[1] = TimerEvent;
-
-  while (TRUE) {
-    Status = gBS->WaitForEvent (2, WaitList, &EventIndex);
-    if (EFI_ERROR (Status)) {
-      DEBUG ((EFI_D_ERROR, "WaitForEvent failed: %r\n", Status));
-      break;
-    }
-
-    if (EventIndex == 0) {
-      /* 按键事件触发 */
-      Status = gST->ConIn->ReadKeyStroke (gST->ConIn, &Key);
-      if (!EFI_ERROR (Status)) {
-        DEBUG ((EFI_D_INFO, "Key detected: ScanCode=0x%x, UnicodeChar=0x%x\n",
-                Key.ScanCode, Key.UnicodeChar));
-
-        if (Key.ScanCode == SCAN_UP) { /* recovery / boot menu key */
-          /* 检测到音量上键 */
-          KeyDetected = 1;
-          break;
-        }
-        /* 不是目标按键（电源键/音量下键等），忽略并继续等待 */
-        DEBUG ((EFI_D_INFO, "Not volume up key, continue waiting...\n"));
-      }
-    } else {
-      /* 定时器超时 */
-      DEBUG ((EFI_D_INFO, "Timeout: %d ms expired, no volume up key\n",
-              TimeoutMs));
-      break;
-    }
-  }
-
-  /* 清理定时器事件 */
-  gBS->CloseEvent (TimerEvent);
-
-  return KeyDetected;
-}
-
 EFI_STATUS EFIAPI  __attribute__ ( (no_sanitize ("safe-stack")))
 LinuxLoaderEntry (IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
 {
 
   EFI_STATUS Status;
+
+  /* Parent ABL checks the same reason after GBL returns. Preserve it and
+   * return before input, storage, graphics or the BDS menu can interfere. */
+  if (SfbNativeFastbootPending ()) {
+    return EFI_SUCCESS;
+  }
 
    /* Update stack check guard with random value for better security */
   /* SilentMode Boot */
@@ -210,29 +128,35 @@ LinuxLoaderEntry (IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
     goto stack_guard_update_default;
   }
 
-  Status = EnumeratePartitions ();
-
-  if (EFI_ERROR (Status)) {
-    DEBUG ((EFI_D_ERROR, "LinuxLoader: Could not enumerate partitions: %r\n",
-            Status));
-    /* Leave the partition table alone; it was never populated. */
-  } else {
-    UpdatePartitionEntries ();
-  }
-
   {
     UINT8  MenuRequested;
 
-    /*
-     * Scan for Volume Up held at power-on FIRST, before any other init disturbs
-     * the console input. WaitForVolumeUpKey flushes stale input and then waits
-     * for a genuine Volume Up press, skipping every other key (notably the
-     * power key used to switch the device on) rather than being fooled by it.
-     * Volume Up (the official recovery key slot) opens the boot menu; no Volume
-     * Up within the window launches the saved default entry.
-     */
-    MenuRequested = WaitForVolumeUpKey (1000);
-    DEBUG ((EFI_D_INFO, "SFB: power-on volume-up detected=%u\n", MenuRequested));
+    MenuRequested = SfbWaitForBootKey (3000);
+    if (MenuRequested == SFB_BOOT_NATIVE_FASTBOOT) {
+      Status = SfbRequestNativeFastboot ();
+      if (Status == EFI_ALREADY_STARTED) {
+        Status = EFI_SUCCESS;
+        goto stack_guard_update_default;
+      }
+      /* Missing protocol or a reset that returned: provide the embedded
+       * Fastboot as an explicitly identified fallback, without artwork. */
+      DEBUG ((EFI_D_ERROR, "Native Fastboot request failed: %r\n", Status));
+    }
+
+    Status = EnumeratePartitions ();
+
+    if (EFI_ERROR (Status)) {
+      DEBUG ((EFI_D_ERROR, "LinuxLoader: Could not enumerate partitions: %r\n",
+              Status));
+      /* Leave the partition table alone; it was never populated. */
+    } else {
+      UpdatePartitionEntries ();
+    }
+
+    if (MenuRequested == SFB_BOOT_NATIVE_FASTBOOT) {
+      Print (L"Native handoff unavailable; entering BDS Fastboot fallback.\n");
+      goto launch_fastboot;
+    }
 
     /*
      * Now bring up the embedded FAT/USB stack so both the default entry and the
@@ -247,7 +171,9 @@ LinuxLoaderEntry (IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
     if (!MenuRequested) {
       /* No menu key: boot the saved default. This does not return on success;
        * it only comes back if there is no saved default or the launch failed,
-       * in which case the menu is shown so the user is never stranded. */
+       * in which case the menu is shown. Optional artwork is initialized only
+       * inside this path, after a persisted default has been resolved. The
+       * volume-up and first-boot menu paths never enter the artwork code. */
       SfbLaunchDefaultEntry ();
     }
 
@@ -267,6 +193,7 @@ LinuxLoaderEntry (IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
     DEBUG ((EFI_D_INFO, "Boot menu requested fastboot\n"));
   }
 
+launch_fastboot:
 #ifdef AUTO_VIRT_ABL
   DEBUG ((EFI_D_INFO, "Rebooting the device.\n"));
   RebootDevice (NORMAL_MODE);

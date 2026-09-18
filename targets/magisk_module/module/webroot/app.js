@@ -13,9 +13,9 @@ const state = {
 
 const i18n = {
   zh: {
-    pageTitle: "假回锁 - BL Flasher",
+    pageTitle: "gbl_uefi · UEFI 启动管理",
     ksuWebUI: "KernelSU Module WebUI",
-    heroDesc: "自动识别当前活动槽位，若新版本存在GBL漏洞则跳过BL刷写；将BL镜像刷写到另一槽位，并将破解ABL放入persist的efisp目录、BDS刷入efisp分区",
+    heroDesc: "基于 GBL 的 UEFI 启动管理与实验工具。支持 EFI 启动项、七张随机开机图片、UEFI 工具菜单和只读防回滚检查；下方保留 BL/OTA 辅助操作。",
     slotStatus: "槽位状态",
     refresh: "刷新",
     currentSlot: "当前槽位",
@@ -23,9 +23,9 @@ const i18n = {
     imageCount: "镜像数量",
     taskStatus: "任务状态",
     flash: "刷写到另一槽位",
-    bdsTools: "仅更新BDS和Tools",
+    bdsTools: "更新 BDS、工具与开机图片",
     confirmBdsTools: "确认更新 BDS/Tools",
-    modalBdsStep1: "将把 BDS.efi 刷入 efisp 分区，并用模块自带的 efisp 文件夹（BOOTENTRIES 与 tools）替换 persist 上的启动根目录。不会改动 ABL 与 boot.efi。",
+    modalBdsStep1: "将更新 efisp 分区中的 BDS，并部署启动项、工具及七张随机图片。先检查 persist 空间并把更新前的 BDS 和启动文件备份到模块 tmp。不会改动 ABL 与 boot.efi。",
     modalBdsStep2: "第二次确认: 这是高风险写入操作，错误的 BDS 或 efisp 写入可能导致无法进入启动菜单。确认后将立即开始。",
     toastStartBdsTools: "BDS/Tools 更新任务已启动",
     toastBdsToolsDone: "BDS/Tools 更新完成",
@@ -71,9 +71,9 @@ const i18n = {
     startFail:"启动失败"
   },
   en: {
-    pageTitle: "Fake Lock - BL Flasher",
+    pageTitle: "gbl_uefi · UEFI Boot Manager",
     ksuWebUI: "KernelSU Module WebUI",
-    heroDesc: "Auto-detect active slot. Skip BL flash if new build has GBL exploit. Flash BL images to inactive slot, place the cracked ABL in persist's efisp dir and flash the BDS to the efisp partition.",
+    heroDesc: "A GBL-based UEFI boot manager and playground: EFI entries, seven randomized boot pictures, UEFI tools and read-only anti-rollback checks. BL/OTA utilities remain available below.",
     slotStatus: "Slot Status",
     refresh: "Refresh",
     currentSlot: "Current Slot",
@@ -81,9 +81,9 @@ const i18n = {
     imageCount: "Image Count",
     taskStatus: "Task Status",
     flash: "Flash To Other Slot",
-    bdsTools: "Update BDS & Tools Only",
+    bdsTools: "Update BDS, Tools & Artwork",
     confirmBdsTools: "Confirm BDS/Tools Update",
-    modalBdsStep1: "Will flash BDS.efi to the efisp partition and replace the persist boot root with the bundled efisp folder (BOOTENTRIES and tools). The ABL and boot.efi are not touched.",
+    modalBdsStep1: "Updates BDS on efisp and deploys boot entries, tools and seven random pictures. Checks persist space and backs up the previous BDS and boot files to the module tmp directory first. ABL and boot.efi are not changed.",
     modalBdsStep2: "2nd Confirm: This is a high-risk write. A wrong BDS or efisp write may prevent the boot menu from loading. It starts immediately after confirm.",
     toastStartBdsTools: "BDS/Tools update started",
     toastBdsToolsDone: "BDS/Tools update completed",
@@ -173,7 +173,8 @@ function applyLanguage(lang) {
   document.querySelector("#tblSource").textContent = t.source;
   document.querySelector("#tblTarget").textContent = t.target;
   document.querySelector("#tblAction").textContent = t.action;
-  document.querySelector("#tblWaiting").textContent = t.waiting;
+  const waitingCell = document.querySelector("#tblWaiting");
+  if (waitingCell) waitingCell.textContent = t.waiting;
   document.querySelector("#lblLog").textContent = t.log;
   document.querySelector("#lblAutoPoll").textContent = t.autoPoll;
   document.querySelector("#modalRisk").textContent = t.risk;
@@ -191,6 +192,7 @@ function applyLanguage(lang) {
     const key = el.dataset.i18n;
     if (t[key]) el.textContent = t[key];
   });
+  globalThis.refreshArbLanguage?.();
 }
 
 function getKsuBridge() {
@@ -283,6 +285,7 @@ function renderStatus(status) {
   const cur = status.CURRENT_SLOT || "-";
   const tar = status.TARGET_SLOT || "-";
   const run = status.RUNNING === "1";
+  globalThis.updateArbRunning?.(run);
   const st = status.STATE || "idle";
   const msg = status.MESSAGE || t.waitOperate;
   elements.currentSlot.textContent = cur;

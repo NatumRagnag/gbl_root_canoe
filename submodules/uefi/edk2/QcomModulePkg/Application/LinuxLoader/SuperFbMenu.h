@@ -274,8 +274,8 @@ SfbSaveCustomEntry (IN CONST SFB_BOOT_ENTRY *Entry);
  * default first unless Temporary is TRUE. Only returns if the launch failed or
  * the started image returned.
  *
- * ClearScreen controls the "Booting <name>" banner: TRUE clears the screen
- * first (menu-driven launch), FALSE leaves the current screen contents in place
+ * ClearScreen controls display preparation: TRUE clears the screen
+ * (menu-driven launch), FALSE leaves the current screen contents in place
  * (unattended default boot, which must not blank the boot splash).
  */
 EFI_STATUS
@@ -345,14 +345,19 @@ VOID
 SfbShowEnteringMenu (VOID);
 
 /*
- * Announce that an entry is being launched, so the menu the user picked from
- * does not stay on screen while the image loads. Title is "Booting <Name>".
+ * Prepare for an entry launch without printing a banner, so the menu the user
+ * picked from does not stay on screen while the image loads.
  *
  * When ClearScreen is TRUE the console is cleared first (menu launch); when
  * FALSE the current screen is left as-is (unattended default boot).
  */
 VOID
-SfbShowBootingScreen (IN CONST CHAR16 *Name, IN BOOLEAN ClearScreen);
+SfbPrepareBootScreen (IN BOOLEAN ClearScreen);
+
+/* Optional fixed-resolution splash. Failure never prevents normal boot. */
+VOID SfbSplashBegin (VOID);
+VOID SfbSplashLoad (VOID);
+BOOLEAN SfbSplashRestore (VOID);
 
 /* Wait for a key. TimeoutMs of 0 waits indefinitely. */
 SFB_KEY

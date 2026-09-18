@@ -199,25 +199,21 @@ SfbShowFastbootMode (VOID)
 }
 
 /*
- * Clear the menu away and announce the launch. The loaded image prints nothing
- * of its own until it takes over, so without this the boot menu would linger on
- * screen through the load.
+ * Clear the menu away for an explicit launch. Default boot is silent and keeps
+ * the existing splash; do not overlay a "Booting Android" message on it.
  */
 VOID
-SfbShowBootingScreen (IN CONST CHAR16 *Name, IN BOOLEAN ClearScreen)
+SfbPrepareBootScreen (IN BOOLEAN ClearScreen)
 {
-  gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_TITLE);
   /*
    * An unattended default boot must not blank whatever is already on screen
    * (typically the boot splash): only clear when the launch came from the menu,
    * where the menu itself is what needs clearing away.
    */
-  if (ClearScreen) {
+  if (ClearScreen && !SfbSplashRestore ()) {
     gST->ConOut->ClearScreen (gST->ConOut);
   }
   gST->ConOut->EnableCursor (gST->ConOut, FALSE);
-
-  Print (L"Booting %s\r\n", (Name != NULL && Name[0] != L'\0') ? Name : L"...");
 
   gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_NORMAL);
 }

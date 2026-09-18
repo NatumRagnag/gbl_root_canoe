@@ -377,7 +377,7 @@ SfbEfiActionMenu (IN EFI_HANDLE   Volume,
 
     if (Cursor == 0) {
       /* Temporary: deliberately does not touch the default-entry variable.
-       * Menu-driven launch, so clear the screen for the "Booting" banner. */
+       * Menu-driven launch, so clear the browser before starting the image. */
       Status = SfbLaunchEntry (&Entry, TRUE, TRUE);
       if (EFI_ERROR (Status)) {
         SfbReportStatus (L"Boot failed", Status);
@@ -670,4 +670,3 @@ SfbRunFileBrowser (VOID)
   FreePool (Rows);
   FreePool (Volumes);
 }
-

@@ -1,0 +1,26 @@
+## @file
+# Standalone application decoder. Deliberately excludes GuidedSectionExtraction
+# and its constructor: no protocol registration or platform fixed-address table.
+# Uses the existing EDK2 LZMA SDK implementation without copying its sources.
+# SPDX-License-Identifier: BSD-2-Clause-Patent
+##
+[Defines]
+  INF_VERSION = 0x00010005
+  BASE_NAME = RawLzmaDecompressLib
+  FILE_GUID = 8b407b86-d68a-46bc-af41-cbfd1c2f5ff4
+  MODULE_TYPE = BASE
+  VERSION_STRING = 1.0
+  LIBRARY_CLASS = RawLzmaDecompressLib
+
+[Sources]
+  LzmaDecompress.c
+  Sdk/C/LzmaDec.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  MdeModulePkg/MdeModulePkg.dec
+
+[LibraryClasses]
+  BaseLib
+  BaseMemoryLib
+  DebugLib

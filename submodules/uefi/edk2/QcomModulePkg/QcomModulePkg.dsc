@@ -85,7 +85,7 @@
   UefiDriverEntryPoint|MdePkg/Library/UefiDriverEntryPoint/UefiDriverEntryPoint.inf
   PerformanceLib|MdeModulePkg/Library/DxePerformanceLib/DxePerformanceLib.inf
   BaseMemoryLib|MdePkg/Library/BaseMemoryLib/BaseMemoryLib.inf
-  LzmaDecompressLib|MdeModulePkg/Library/LzmaCustomDecompressLib/LzmaCustomDecompressLib.inf
+  RawLzmaDecompressLib|MdeModulePkg/Library/LzmaCustomDecompressLib/RawLzmaDecompressLib.inf
 
   # FAT stack linked into LinuxLoader so the boot menu can read FAT32 volumes
   # even where the platform firmware publishes nothing above Block I/O. These

@@ -166,7 +166,29 @@ persist_mounted() { grep -q " $PERSIST_MNT " /proc/mounts; }
 # hidden until a previous boot.efi has been backed up. boot.efi / boot_backup.efi
 # are generated at runtime and are not part of the bundle, so they are preserved.
 place_efisp_tree_to() {
-  cp -r "$MODDIR/efisp/." "$1/" >> "$LOG_FILE" 2>&1
+  cp -r "$MODDIR/efisp/." "$1/" >> "$LOG_FILE" 2>&1 || return 1
+}
+
+check_efisp_space() {
+  # Reserve 2 MiB beyond growth; do not count the generated boot.efi files as
+  # replaceable space. Existing bundled artwork may be overwritten in place.
+  space_need=$(du -sk "$MODDIR/efisp" 2>/dev/null | awk '{print $1}')
+  space_have=0
+  if [ -d "$EFISP_DIR/splash" ]; then
+    space_have=$(du -sk "$EFISP_DIR/splash" 2>/dev/null | awk '{print $1}')
+  fi
+  space_free=$(df -Pk "$PERSIST_MNT" 2>/dev/null | tail -n1 | awk '{print $4}')
+  for space_value in "$space_need" "$space_have" "$space_free"; do
+    case "$space_value" in
+      ''|*[!0-9]*) write_log "Cannot read persist free space"; return 1 ;;
+    esac
+  done
+  space_growth=$((space_need - space_have))
+  [ "$space_growth" -lt 0 ] && space_growth=0
+  if [ "$space_free" -lt $((space_growth + 2048)) ]; then
+    write_log "persist space insufficient: need $((space_growth + 2048)) KiB, free $space_free KiB"
+    return 1
+  fi
 }
 
 # Extract and crack the target-slot ABL, then lay out the \efisp boot root
@@ -207,6 +229,7 @@ update_efisp() {
       write_log "$TEXT_PERSIST_NOT_MOUNTED"
       return 1
     fi
+    check_efisp_space || return 1
   fi
 
   mkdir -p "$efisp_target" >> "$LOG_FILE" 2>&1 || { write_log "$TEXT_EFISP_MKDIR_FAILED"; return 1; }
@@ -222,7 +245,7 @@ update_efisp() {
     write_log "$TEXT_EFISP_WRITE_FAILED"
     return 1
   fi
-  place_efisp_tree_to "$efisp_target"
+  place_efisp_tree_to "$efisp_target" || { write_log "$TEXT_EFISP_WRITE_FAILED"; return 1; }
   sync
   write_log "$TEXT_EFISP_FILES_OK"
 
@@ -307,6 +330,16 @@ update_bds_tools() {
 
   mkdir -p "$EFISP_DIR" >> "$LOG_FILE" 2>&1 || { write_log "$TEXT_EFISP_MKDIR_FAILED"; return 1; }
 
+  check_efisp_space || return 1
+  # Backups live on /data, not on the small persist partition. Keep the most
+  # recent pre-update state for recovery without touching ABL or slot flags.
+  dd if="$BY_NAME_DIR/efisp" of="$RUNTIME_DIR/efisp-before.img" bs=1M >> "$LOG_FILE" 2>&1 || return 1
+  tar -cf "$RUNTIME_DIR/efisp-files-before.tar" -C "$EFISP_DIR" . >> "$LOG_FILE" 2>&1 || return 1
+
+  # Place optional resources successfully before activating the new BDS.
+  place_efisp_tree_to "$EFISP_DIR" || { write_log "$TEXT_EFISP_WRITE_FAILED"; return 1; }
+  sync
+
   # 1. Flash the BDS itself to the raw efisp partition.
   if ! blockdev --setrw "$BY_NAME_DIR/efisp" >> "$LOG_FILE" 2>&1; then
     write_log "$TEXT_EFISP_SET_RW_FAILED"
@@ -319,9 +352,6 @@ update_bds_tools() {
   sync
   write_log "$TEXT_EFISP_FLASH_OK"
 
-  # 2. Replace the boot-root tree (BOOTENTRIES + tools/) with the bundled one.
-  place_efisp_tree_to "$EFISP_DIR"
-  sync
   write_log "$TEXT_EFISP_FILES_OK"
   return 0
 }
@@ -458,6 +488,7 @@ clear_log() {
 }
 
 case "$1" in
+  check-space) check_efisp_space ;;
   status) print_status ;;
   flash) run_flash "$2" ;;
   start) start_flash "$2" ;;

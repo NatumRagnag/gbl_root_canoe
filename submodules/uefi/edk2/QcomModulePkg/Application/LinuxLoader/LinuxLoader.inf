@@ -70,11 +70,15 @@
 
 [Sources]
 	LinuxLoader.c
+	SuperFbBootKeys.c
+	SuperFbBootKeys.h
 	SuperFbMenu.h
 	SuperFbFat.c
 	SuperFbStore.c
 	SuperFbEntries.c
 	SuperFbMenu.c
+	SuperFbSplash.c
+	SuperFbSplashPixels.h
 	SuperFbBrowser.c
 
 [Packages]
@@ -100,6 +104,7 @@
 	FastbootLib
 	PrintLib
 	MemoryAllocationLib
+	RawLzmaDecompressLib
 	UefiRuntimeServicesTableLib
 	# FAT stack carried inside the image: the boot menu starts these by hand
 	# instead of relying on a DXE dispatcher to do it.
@@ -144,6 +149,7 @@
 	gEfiPartTypeSystemPartGuid
 
 [Protocols]
+	gEfiGraphicsOutputProtocolGuid
 	gEfiSimpleTextInputExProtocolGuid
 	gEfiBlockIoProtocolGuid
 	gEfiLoadedImageProtocolGuid
