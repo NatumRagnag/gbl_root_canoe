@@ -25,6 +25,7 @@ jobs:
       run: |
         make -C submodules/patcher build
         python3 submodules/patcher/tests/test_avf.py
+        python3 submodules/patcher/tests/test_avf_scripts.py
         make target_toolkit_linux
         make target_toolkit_windows
         make target_toolkit_android

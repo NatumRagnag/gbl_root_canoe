@@ -42,7 +42,7 @@ if [ "$LANG" = "zh" ]; then
   TEXT_GBL_VULN_SKIP="已跳过BL刷写"
   TEXT_GBL_DETECT_FAILED="漏洞检测失败，继续流程"
   TEXT_NO_GBL_VULN="未检测到GBL漏洞"
-  TEXT_EFISP_WARN="efisp 刷写失败，继续刷入BL"
+  TEXT_EFISP_ABORT="efisp 更新失败，已停止刷写"
   TEXT_SET_RW_FAILED="分区设置可写失败"
   TEXT_FLASH_PART="刷写"
   TEXT_FLASH_OK="完成"
@@ -78,7 +78,7 @@ else
   TEXT_GBL_VULN_SKIP="Skipped BL flash"
   TEXT_GBL_DETECT_FAILED="Vuln check failed"
   TEXT_NO_GBL_VULN="No GBL vuln found"
-  TEXT_EFISP_WARN="efisp failed, continue BL"
+  TEXT_EFISP_ABORT="efisp update failed; flashing stopped"
   TEXT_SET_RW_FAILED="setrw failed"
   TEXT_FLASH_PART="Flashing"
   TEXT_FLASH_OK="done"
@@ -186,8 +186,15 @@ update_efisp() {
   abl=$1
   is_debug=$2
   rm -f $RUNTIME_DIR/*
-  $MODDIR/bin/extractfv -o $RUNTIME_DIR -v "$abl" >> "$LOG_FILE" 2>&1
-  $MODDIR/bin/patch_abl $RUNTIME_DIR/LinuxLoader.efi $RUNTIME_DIR/patched.efi >> $RUNTIME_DIR/patch.log 2>&1
+  if ! "$MODDIR/bin/extractfv" -o "$RUNTIME_DIR" -v "$abl" >> "$LOG_FILE" 2>&1; then
+    write_log "$TEXT_EXTRACT_FAILED"
+    return 1
+  fi
+  if ! "$MODDIR/bin/patch_abl" "$RUNTIME_DIR/LinuxLoader.efi" "$RUNTIME_DIR/patched.efi" >> "$RUNTIME_DIR/patch.log" 2>&1; then
+    cat "$RUNTIME_DIR/patch.log" >> "$LOG_FILE"
+    write_log "$TEXT_PATCH_FAILED"
+    return 1
+  fi
   cat $RUNTIME_DIR/patch.log >> "$LOG_FILE"
   [ -f $RUNTIME_DIR/patched.efi ] || { write_log "$TEXT_PATCH_FAILED"; return 1; }
 
@@ -251,8 +258,15 @@ update_efisp() {
 
 detect_gbl_vulnerability() {
   rm -f $RUNTIME_DIR/*
-  $MODDIR/bin/extractfv -o $RUNTIME_DIR -v "$1" >> "$LOG_FILE" 2>&1
-  $MODDIR/bin/patch_abl $RUNTIME_DIR/LinuxLoader.efi $RUNTIME_DIR/patched.efi >> $RUNTIME_DIR/patch.log 2>&1
+  if ! "$MODDIR/bin/extractfv" -o "$RUNTIME_DIR" -v "$1" >> "$LOG_FILE" 2>&1; then
+    write_log "$TEXT_EXTRACT_FAILED"
+    return 1
+  fi
+  if ! "$MODDIR/bin/patch_abl" "$RUNTIME_DIR/LinuxLoader.efi" "$RUNTIME_DIR/patched.efi" >> "$RUNTIME_DIR/patch.log" 2>&1; then
+    cat "$RUNTIME_DIR/patch.log" >> "$LOG_FILE"
+    write_log "$TEXT_PATCH_FAILED"
+    return 1
+  fi
   cat $RUNTIME_DIR/patch.log >> "$LOG_FILE"
   [ -f $RUNTIME_DIR/patched.efi ] || { write_log "$TEXT_PATCH_FAILED"; return 1; }
   if ! grep -q "Warning: Failed to patch ABL GBL" $RUNTIME_DIR/patch.log; then
@@ -411,13 +425,12 @@ run_flash() {
     exit 0
   fi
 
-  efisp_fail=0
   if [ "$mode" = "update-efisp" ]; then
     update_efisp "$abl" no
     res=$?
     if [ $res -eq 1 ]; then
-      efisp_fail=1
-      write_state running "$TEXT_EFISP_WARN"
+      write_state error "$TEXT_EFISP_ABORT"
+      exit 1
     elif [ $res -eq 2 ]; then
       write_state success "$TEXT_GBL_VULN_SKIP"
       exit 0
@@ -425,6 +438,7 @@ run_flash() {
   else
     detect_gbl_vulnerability "$abl"
     res=$?
+    [ $res -eq 1 ] && { write_state error "$TEXT_PATCH_FAILED"; exit 1; }
     [ $res -eq 0 ] && { write_state success "$TEXT_GBL_VULN_SKIP"; exit 0; }
   fi
 
@@ -437,9 +451,7 @@ run_flash() {
     write_log "$TEXT_FLASH_PART $part -> $dst $TEXT_FLASH_OK"
   done
 
-  if [ $efisp_fail -eq 1 ]; then
-    write_state warning "BL done, efisp failed"
-  elif [ "$mode" = "update-efisp" ]; then
+  if [ "$mode" = "update-efisp" ]; then
     write_state success "$TEXT_ALL_OK"
   else
     write_state success "$TEXT_ALL_OK_NO_EFISP"
@@ -479,3 +491,4 @@ case "$1" in
   clear-log) clear_log ;;
   *) exit 1 ;;
 esac
+

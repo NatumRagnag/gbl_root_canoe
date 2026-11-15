@@ -42,7 +42,9 @@ submodules/patcher/build/patch_abl LinuxLoader_stock.efi boot_avf_test.efi
 
 这里使用完整文件 SHA-256 白名单，不靠单个指令或相同文件大小猜测版本。
 旧版本模块、主分支及手机中已安装的 patcher 不会因创建此分支自动获得功能。
-只有改用本分支构建的 patcher 才有该行为；仍需检查调用脚本是否正确处理失败。
+只有改用本分支构建的 patcher 才有该行为。模块的 `bl_flasher.sh` 同时增加了
+提取/补丁失败即停止的处理，阻止旧流程在失败后继续复制 ABL；成功路径保持上游行为。
+因此仍不能把整个模块当作“仅替换 EFI”的安装工具。
 不要把旧的输出文件当作本次失败后的成功产物。
 
 只给当前已修改 EFI 追加 AVF，也可使用不依赖编译器的 Python 3 工具：
@@ -70,6 +72,7 @@ python3 tools/patch_avf_nezha.py boot_current_original.efi boot_avf_test.efi
 ```sh
 make -C submodules/patcher build
 python3 submodules/patcher/tests/test_avf.py
+python3 submodules/patcher/tests/test_avf_scripts.py
 # 私有目录包含 boot_current_original.efi 和 LinuxLoader_stock.efi 时：
 AVF_TEST_IMAGE_DIR=/path/to/private/fixtures python3 submodules/patcher/tests/test_avf.py
 ```
@@ -77,6 +80,10 @@ AVF_TEST_IMAGE_DIR=/path/to/private/fixtures python3 submodules/patcher/tests/te
 测试覆盖 SHA-256 填充分界及长输入、未知/截断输入拒绝、无副作用失败、重复应用、
 原厂与当前 EFI 的生成结果一致、C 与 Python 输出一致，以及只变化指定 4 字节。
 上述静态验收不代替真机测试。
+
+另外五项脚本测试通过模拟命令验证：提取失败、patcher 返回失败但留有输出、
+EFI 更新失败、GBL 检测失败均在写入前停止；成功检测仍遵循原来的分支。
+测试中的分区写入命令全部替换为记录调用的模拟函数。
 
 ## 后续真机验收
 
