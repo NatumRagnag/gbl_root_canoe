@@ -1,5 +1,9 @@
 # GBL Root Canoe
 
+> `avf` experimental branch: adds the reviewed nezha AVF/BCC input patch to
+> `patch_abl`. Only allowlisted firmware images are accepted; unknown OTA images
+> fail instead of silently omitting AVF. See [scope, usage and validation status](docs/avf-experimental.md).
+
 [中文版](README_zh.md)
 
 ![Stone Badge](https://stone.professorlee.work/api/stone/superturtlee/gbl_root_canoe)
@@ -92,3 +96,4 @@ Common commands include:
 2. `boot.efi` / `ABL.efi`: The cracked ABL with fake re-lock (the module names it `boot.efi`; the toolkit names it `ABL.efi`), placed on `persist` under `efisp/`.
 3. `LinuxLoader.efi` / `ABL_original.efi`: The original unpatched ABL. For analysis; do not flash to `efisp`.
 4. `BOOTENTRIES`: Boot entry list, format `<name>:<path relative to efisp/>`.
+

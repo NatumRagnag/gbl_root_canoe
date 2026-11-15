@@ -23,6 +23,8 @@ jobs:
 
     - name: Build Toolkits
       run: |
+        make -C submodules/patcher build
+        python3 submodules/patcher/tests/test_avf.py
         make target_toolkit_linux
         make target_toolkit_windows
         make target_toolkit_android
@@ -90,3 +92,4 @@ jobs:
       with:
         name: vbmetafixer_android
         path: artifacts/vbmetafixer_android/*
+

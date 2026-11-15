@@ -1,5 +1,6 @@
 #include "arm64_inst/utils.h"
 #include "patchs/core.h"
+#include "patchs/avf.h"
 #include <stdlib.h>
 
 int32_t patch_abl_gbl(char* buffer, int32_t size) {
@@ -174,6 +175,15 @@ int32_t patch_adrl_unlocked_to_locked(char* buffer, int32_t size, uint64_t load_
 #include "patchs/oplus/warning.h"
 #include "patchs/oplus/forceenablefastboot.h"
 bool PatchBuffer(char* data, int32_t size) {
+    AvfImageKind avf_kind = ClassifyAvfImage(data, size);
+    if (avf_kind == AVF_IMAGE_UNKNOWN) {
+        printf("AVF branch: unsupported image; no output will be generated.\n");
+        printf("Use a reviewed profile; do not carry offsets across OTA versions.\n");
+        return false;
+    }
+    if (avf_kind != AVF_IMAGE_STOCK)
+        return PatchAvfBuffer(data, size);
+
     if (patch_abl_gbl(data, size) != 0)
         printf("Warning: Failed to patch ABL GBL\n");
 
@@ -218,5 +228,6 @@ bool PatchBuffer(char* data, int32_t size) {
     }
     // ==========================================================
 
-    return 1;
+    return PatchAvfBuffer(data, size);
 }
+
