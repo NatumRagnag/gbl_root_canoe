@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* This experimental branch intentionally accepts only reviewed image profiles. */
+/* Exact known-image identities are compatibility shortcuts, not OTA gates. */
 typedef enum {
     AVF_IMAGE_UNKNOWN = 0,
     AVF_IMAGE_STOCK,
@@ -14,6 +14,7 @@ typedef enum {
 } AvfImageKind;
 
 AvfImageKind ClassifyAvfImage(const char *data, int32_t size);
+int32_t FindAvfPatch(const char *data, int32_t size, uint8_t *reg, bool *patched);
 bool PatchAvfBuffer(char *data, int32_t size);
 
 #ifdef AVF_TESTING

@@ -176,12 +176,9 @@ int32_t patch_adrl_unlocked_to_locked(char* buffer, int32_t size, uint64_t load_
 #include "patchs/oplus/forceenablefastboot.h"
 bool PatchBuffer(char* data, int32_t size) {
     AvfImageKind avf_kind = ClassifyAvfImage(data, size);
-    if (avf_kind == AVF_IMAGE_UNKNOWN) {
-        printf("AVF branch: unsupported image; no output will be generated.\n");
-        printf("Use a reviewed profile; do not carry offsets across OTA versions.\n");
-        return false;
-    }
-    if (avf_kind != AVF_IMAGE_STOCK)
+    /* Preserve the already-patched inputs supported by the first AVF version.
+     * Stock/OTA images use the normal instruction-based patch pipeline below. */
+    if (avf_kind == AVF_IMAGE_TEE_PATCHED || avf_kind == AVF_IMAGE_PATCHED)
         return PatchAvfBuffer(data, size);
 
     if (patch_abl_gbl(data, size) != 0)

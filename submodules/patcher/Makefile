@@ -1,6 +1,8 @@
 SRCS := $(shell find src -name '*.c')
 CFLAGS := -O2 -Iinclude
 
+.PHONY: clean build build_android build_windows
+
 clean:
 	rm -rf build || true
 
@@ -15,3 +17,4 @@ build_android:
 build_windows:
 	mkdir -p build
 	x86_64-w64-mingw32-gcc $(CFLAGS) -o build/patch_abl.exe $(SRCS)
+

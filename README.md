@@ -1,8 +1,8 @@
 # GBL Root Canoe
 
-> `avf` experimental branch: adds the reviewed nezha AVF/BCC input patch to
-> `patch_abl`. Only allowlisted firmware images are accepted; unknown OTA images
-> fail instead of silently omitting AVF. See [scope, usage and validation status](docs/avf-experimental.md).
+> `avf` experimental branch: adds instruction-matched AVF/BCC patching to the
+> normal TEE patch pipeline in `patch_abl`. OTA inputs are not gated by whole-file
+> hashes; an unsupported or ambiguous AVF pattern fails. See [scope, usage and validation status](docs/avf-experimental.md).
 
 [中文版](README_zh.md)
 

@@ -2,7 +2,8 @@
 """Add only the reviewed AVF instruction to an existing TEE-patched EFI.
 
 This does not flash, reboot, modify boot entries, or accept arbitrary firmware.
-The C patcher on the avf branch also handles the reviewed stock input.
+The C patcher handles stock/OTA inputs through instruction-pattern matching;
+this helper remains restricted to the reviewed current image.
 """
 import argparse
 import hashlib

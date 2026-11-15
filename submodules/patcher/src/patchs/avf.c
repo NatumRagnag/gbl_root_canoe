@@ -1,14 +1,12 @@
 #include "patchs/avf.h"
+#include "arm64_inst/arm64_inst_decoder.h"
 
 #include <stdio.h>
 #include <string.h>
 
-/* Xiaomi 17 Ultra (nezha), OS4.0.2.0.XPACNXM. File offsets equal RVAs
- * in this reviewed PE image. Do not reuse the offset on another image.
- * The full-image allowlist is deliberate: pattern-only matching is not yet
- * validated across ABL versions or vendors. */
+/* Known images are retained only for compatibility with already TEE-patched
+ * inputs. They are not an allowlist for the normal stock/OTA patch pipeline. */
 #define AVF_IMAGE_SIZE 1089536
-#define AVF_UNLOCK_LOAD_OFFSET 0x24588
 
 static const char stock_hash[] =
     "7c0b96923fd8d7d30e3462aa2427cfc10cafdc1f7f5b8243ac6285fe0204442f";
@@ -103,27 +101,108 @@ AvfImageKind ClassifyAvfImage(const char *data, int32_t size) {
     return AVF_IMAGE_UNKNOWN;
 }
 
+/* Reviewed BCC mode block, with relocated addresses, stack displacement and
+ * compiler-assigned temporary registers decoded rather than hard-coded:
+ *   ADRP u; LDRB flags,[ctx,#3]; LDRB tmp,[ctx,#2]; MOV one,#1
+ *   MOV W1,WZR; MOV W2,#0x28; LDRB u,[u,#unlock_offset]
+ *   ORR flags,flags,tmp; ADD tmp,SP,#stack; ADD X0,tmp,#4
+ *   CMP u,#0; CINC u,one,NE; CMP flags,#0; MOV flags,#3
+ *   CSEL flags,u,flags,EQ; ADRP u; STR flags,[u,#mode_offset]
+ * Only the unlock LDRB is replaced. The mode=3 condition stays intact.
+ * A different instruction order/control flow requires a new reviewed pattern. */
+static bool match_mode_block(const char *data, int32_t off, uint8_t *reg,
+                             bool *already_patched) {
+    DecodedInst d[17];
+    for (int i = 0; i < 17; ++i) d[i] = decode_at(data, off + i * 4);
+    uint8_t u=d[0].rt, flags=d[1].rt, tmp=d[2].rt, one=d[3].rt;
+    const uint8_t regs[] = {u, flags, tmp, one};
+    for (unsigned i = 0; i < sizeof(regs); ++i) {
+        /* These temporaries must not clobber the memset arguments X0/W1/W2. */
+        if (regs[i] < 3 || regs[i] == 31) return false;
+        for (unsigned j = 0; j < i; ++j)
+            if (regs[i] == regs[j]) return false;
+    }
+    if (d[0].type != INST_ADRP || d[1].type != INST_LDRB_IMM ||
+        d[2].type != INST_LDRB_IMM || d[1].imm != 3 || d[2].imm != 2 ||
+        d[1].rn != d[2].rn || d[1].rn == u || d[1].rn == flags ||
+        d[1].rn == 31 || d[3].raw != encode_movz_w(one, 1) ||
+        d[4].raw != 0x2a1f03e1 || d[5].raw != encode_movz_w(2, 0x28))
+        return false;
+
+    bool patched = d[6].raw == encode_movz_w(u, 0);
+    if (!patched && !(d[6].type == INST_LDRB_IMM && d[6].rt == u && d[6].rn == u))
+        return false;
+    if (d[7].raw != (0x2a000000u | ((uint32_t)tmp << 16) | ((uint32_t)flags << 5) | flags) ||
+        d[8].type != INST_ADD_X_IMM || d[8].rt != tmp || d[8].rn != 31 ||
+        d[8].shift != 0 || d[9].raw != (0x91001000u | ((uint32_t)tmp << 5)) ||
+        d[10].raw != (0x7100001fu | ((uint32_t)u << 5)) ||
+        d[11].raw != (0x1a800400u | ((uint32_t)one << 16) | ((uint32_t)one << 5) | u) ||
+        d[12].raw != (0x7100001fu | ((uint32_t)flags << 5)) ||
+        d[13].raw != encode_movz_w(flags, 3) ||
+        d[14].raw != (0x1a800000u | ((uint32_t)flags << 16) | ((uint32_t)u << 5) | flags) ||
+        d[15].type != INST_ADRP || d[15].rt != u ||
+        d[16].type != INST_STR_W_IMM || d[16].rt != flags || d[16].rn != u)
+        return false;
+    *reg = u;
+    *already_patched = patched;
+    return true;
+}
+
+/* Search only executable sections of a bounded ARM64 PE32+ image. No assumption
+ * that section RVAs equal raw file offsets is needed for this instruction patch. */
+int32_t FindAvfPatch(const char *data, int32_t size, uint8_t *reg, bool *patched) {
+    if (!data || !reg || !patched || size < 64 || data[0] != 'M' || data[1] != 'Z')
+        return -1;
+    uint32_t pe = read_instr(data, 0x3c);
+    if (pe > (uint32_t)size - 24 || read_instr(data, (int32_t)pe) != 0x4550)
+        return -1;
+    uint32_t coff = read_instr(data, (int32_t)pe + 4);
+    uint32_t sections = coff >> 16;
+    uint32_t optional_size = read_instr(data, (int32_t)pe + 20) & 0xffff;
+    if ((coff & 0xffff) != 0xaa64 || !sections || optional_size < 4 ||
+        optional_size > (uint32_t)size - pe - 24)
+        return -1;
+    uint32_t table = pe + 24 + optional_size;
+    if ((read_instr(data, (int32_t)pe + 24) & 0xffff) != 0x20b ||
+        sections > ((uint32_t)size - table) / 40)
+        return -1;
+    int32_t found = -1;
+    for (uint32_t s = 0; s < sections; ++s) {
+        int32_t hdr = (int32_t)(table + s * 40);
+        uint32_t bytes = read_instr(data, hdr + 16), raw = read_instr(data, hdr + 20);
+        uint32_t attributes = read_instr(data, hdr + 36);
+        if (raw > (uint32_t)size || bytes > (uint32_t)size - raw) return -1;
+        if (!(attributes & 0x20000000) || bytes < 68 || (raw & 3)) continue;
+        for (uint32_t i = raw; i <= raw + bytes - 68; i += 4) {
+            if (!match_mode_block(data, (int32_t)i, reg, patched)) continue;
+            if (found >= 0) return -1; /* Never pick the first of multiple candidates. */
+            found = (int32_t)i + 24;
+        }
+    }
+    return found;
+}
+
 bool PatchAvfBuffer(char *data, int32_t size) {
     AvfImageKind kind = ClassifyAvfImage(data, size);
-    if (kind == AVF_IMAGE_PATCHED) {
-        printf("AVF: reviewed image already patched; no changes.\n");
+    uint8_t reg = 0;
+    bool patched = false;
+    int32_t off = FindAvfPatch(data, size, &reg, &patched);
+    if (off < 0) {
+        printf("AVF: no unique supported BCC mode pattern in executable ARM64 PE sections.\n");
+        return false;
+    }
+    if (patched) {
+        printf("AVF: mode input at 0x%X already patched; no changes.\n", off);
         return true;
     }
-    if (kind != AVF_IMAGE_TEE_PATCHED) {
-        printf("AVF: image is not the reviewed TEE-patched nezha image; refusing.\n");
-        return false;
-    }
-    const uint8_t original[4] = {0x29,0x75,0x77,0x39}; /* LDRB W9,[X9,#0xddd] */
-    const uint8_t replacement[4] = {0x09,0x00,0x80,0x52}; /* MOV W9,#0 */
-    if (memcmp(data + AVF_UNLOCK_LOAD_OFFSET, original, sizeof(original)))
-        return false;
-    memcpy(data + AVF_UNLOCK_LOAD_OFFSET, replacement, sizeof(replacement));
-    if (ClassifyAvfImage(data, size) != AVF_IMAGE_PATCHED) {
-        memcpy(data + AVF_UNLOCK_LOAD_OFFSET, original, sizeof(original));
+    uint32_t original = read_instr(data, off);
+    write_instr(data, off, encode_movz_w(reg, 0));
+    if (kind == AVF_IMAGE_TEE_PATCHED && ClassifyAvfImage(data, size) != AVF_IMAGE_PATCHED) {
+        write_instr(data, off, original);
         printf("AVF: output identity mismatch; reverted buffer change.\n");
         return false;
     }
-    printf("AVF: 0x24588 LDRB W9,[X9,#0xddd] -> MOV W9,#0.\n");
+    printf("AVF: 0x%X LDRB W%u -> MOV W%u,#0 (BCC mode input).\n", off, reg, reg);
     printf("AVF: TEE edits, global DevInfo, mode=3 and dummy fallback preserved.\n");
     return true;
 }
